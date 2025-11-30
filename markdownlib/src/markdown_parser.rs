@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use crate::{Block, Document, Heading};
+use crate::{Block, Document, Heading, Inline, Paragraph};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,7 +15,8 @@ pub struct MarkdownParseError {
 enum ParseState {
     Start,
     Heading,
-    // Paragraph,
+    Paragraph,
+    ParagraphEndCandidate,
     // LinkText,
     // LinkUrl,
 }
@@ -23,34 +24,80 @@ enum ParseState {
 fn parse(input: &str) -> Result<Document, MarkdownParseError> {
     let mut state = ParseState::Start;
 
-    if input.is_empty() {
-        return Ok(Document::new());
-    }
-
     let mut doc = Document::new();
 
     // Parse heading from input
     let mut characters = input.chars().peekable();
     let mut line_number = 1;
 
-    while let Some(c) = characters.peek() {
-        if *c == '\n' {
+    let mut paragraph_text = String::new();
+    let mut paragraph_end_candidate_text = String::new();
+
+    while let Some(next_c) = characters.peek() {
+        if *next_c == '\n' {
             line_number += 1;
-            characters.next();
-            continue;
         }
 
         match state {
             ParseState::Start => {
-                if *c == '#' {
-                    state = ParseState::Heading;
-                }
+                state = ParseState::Paragraph;
             }
             ParseState::Heading => {
                 let heading = parse_heading(&mut characters, line_number)?;
+                line_number += 1;
                 doc.push(Block::Heading(heading));
+
+                state = ParseState::Paragraph;
+            }
+            ParseState::Paragraph => {
+                if *next_c == '#' {
+                    state = ParseState::Heading;
+                    continue;
+                }
+
+                if let Some(c) = characters.next() {
+                    if c == '\n' {
+                        paragraph_end_candidate_text.push(c);
+                        state = ParseState::ParagraphEndCandidate;
+                        continue;
+                    }
+
+                    paragraph_text.push(c);
+                }
+            }
+            ParseState::ParagraphEndCandidate => {
+                if let Some(c) = characters.next() {
+                    // If we encounter another newline, we finalize the paragraph
+                    if c == '\n' {
+                        doc.push(Block::Paragraph(Paragraph {
+                            inlines: vec![Inline::Text(paragraph_text.to_string())],
+                        }));
+                        paragraph_text.clear();
+                        paragraph_end_candidate_text.clear();
+                        state = ParseState::Paragraph;
+                        continue;
+                    }
+                    
+                    // Whitespace after newline, continue accumulating
+                    if c.is_whitespace() {
+                        paragraph_end_candidate_text.push(c);
+                        continue;
+                    }
+
+                    // This is just another line in the same paragraph, possibly after some spaces
+                    paragraph_text.push_str(&paragraph_end_candidate_text);
+                    paragraph_text.push(c);
+                    paragraph_end_candidate_text.clear();
+                    state = ParseState::Paragraph;
+                }
             }
         }
+    }
+
+    if paragraph_text.len() > 0 {
+        doc.push(Block::Paragraph(Paragraph {
+            inlines: vec![Inline::Text(paragraph_text.to_string())],
+        }));
     }
 
     Ok(doc)
@@ -68,6 +115,7 @@ fn parse_heading(
     let mut title = String::new();
     while let Some(c) = characters.peek() {
         if *c == '\n' {
+            characters.next();
             break;
         }
 
@@ -84,7 +132,39 @@ fn parse_heading(
 
 #[cfg(test)]
 mod tests {
+    use crate::{Inline, Paragraph};
+
     use super::*;
+
+    fn assert_heading(block: &Block, expected_level: u8, expected_text: &str) {
+        match block {
+            Block::Heading(heading) => {
+                assert_eq!(heading.level, expected_level);
+                assert_eq!(heading.text, expected_text);
+            }
+            _ => panic!("Expected a Heading block"),
+        }
+    }
+
+    fn assert_parsing_error(
+        result: Result<Document, MarkdownParseError>,
+        expected_line: usize,
+        expected_column: usize,
+        expected_message_substring: &str,
+    ) {
+        match result {
+            Err(MarkdownParseError {
+                message,
+                line,
+                column,
+            }) => {
+                assert_eq!(line, expected_line);
+                assert_eq!(column, expected_column);
+                assert!(message.contains(expected_message_substring));
+            }
+            _ => panic!("Expected a MarkdownParseError"),
+        }
+    }
 
     #[test]
     fn parse_empty_document() {
@@ -100,13 +180,7 @@ mod tests {
         let doc = parse(input).expect("Failed to parse document");
 
         assert_eq!(doc.len(), 1);
-        match &doc.get(0) {
-            Block::Heading(heading) => {
-                assert_eq!(heading.level, 1);
-                assert_eq!(heading.text, "Heading 1");
-            }
-            _ => panic!("Expected a Heading block"),
-        }
+        assert_heading(&doc.get(0), 1, "Heading 1");
     }
 
     #[test]
@@ -115,13 +189,7 @@ mod tests {
         let doc = parse(input).expect("Failed to parse document");
 
         assert_eq!(doc.len(), 1);
-        match &doc.get(0) {
-            Block::Heading(heading) => {
-                assert_eq!(heading.level, 2);
-                assert_eq!(heading.text, "Heading 2");
-            }
-            _ => panic!("Expected a Heading block"),
-        }
+        assert_heading(&doc.get(0), 2, "Heading 2");
     }
 
     #[test]
@@ -130,20 +198,8 @@ mod tests {
         let doc = parse(input).expect("Failed to parse document");
 
         assert_eq!(doc.len(), 2);
-        match &doc.get(0) {
-            Block::Heading(heading) => {
-                assert_eq!(heading.level, 3);
-                assert_eq!(heading.text, "Heading 3");
-            }
-            _ => panic!("Expected a Heading block"),
-        }
-        match &doc.get(1) {
-            Block::Heading(heading) => {
-                assert_eq!(heading.level, 4);
-                assert_eq!(heading.text, "Heading 4");
-            }
-            _ => panic!("Expected a Heading block"),
-        }
+        assert_heading(&doc.get(0), 3, "Heading 3");
+        assert_heading(&doc.get(1), 4, "Heading 4");
     }
 
     #[test]
@@ -151,18 +207,7 @@ mod tests {
         let input = "####### Invalid Heading";
         let result = parse(input);
 
-        match result {
-            Err(MarkdownParseError {
-                message,
-                line,
-                column,
-            }) => {
-                assert_eq!(line, 1);
-                assert_eq!(column, 1);
-                assert!(message.contains("Invalid heading level: 7"));
-            }
-            _ => panic!("Expected a MarkdownParseError"),
-        }
+        assert_parsing_error(result, 1, 1, "Invalid heading level: 7");
     }
 
     #[test]
@@ -170,17 +215,63 @@ mod tests {
         let input = "# Valid Heading\n## Another Valid Heading\n####### Invalid Heading";
         let result = parse(input);
 
-        match result {
-            Err(MarkdownParseError {
-                message,
-                line,
-                column,
-            }) => {
-                assert_eq!(line, 3);
-                assert_eq!(column, 1);
-                assert!(message.contains("Invalid heading level: 7"));
+        assert_parsing_error(result, 3, 1, "Invalid heading level: 7");
+    }
+
+    #[test]
+    fn parse_heading_with_leading_and_trailing_spaces() {
+        let input = "#    Heading with spaces    ";
+        let doc = parse(input).expect("Failed to parse document");
+        assert_eq!(doc.len(), 1);
+        assert_heading(&doc.get(0), 1, "Heading with spaces");
+    }
+
+    fn assert_paragraph(block: &Block, expected_text: &[&str]) {
+        let expected_paragraph: Paragraph = Paragraph {
+            inlines: expected_text
+                .iter()
+                .map(|&s| Inline::Text(s.to_string()))
+                .collect(),
+        };
+
+        match block {
+            Block::Paragraph(p) => {
+                assert_eq!(*p, expected_paragraph)
             }
-            _ => panic!("Expected a MarkdownParseError"),
+            _ => panic!("Expected a Paragraph block"),
         }
+    }
+
+    #[test]
+    fn parse_paragraph_after_heading() {
+        let input = "# Heading 1\nThis is a paragraph.";
+        let doc = parse(input).expect("Failed to parse document");
+
+        assert_eq!(doc.len(), 2);
+        assert_heading(&doc.get(0), 1, "Heading 1");
+        assert_paragraph(&doc.get(1), ["This is a paragraph."].as_ref());
+    }
+
+    #[test]
+    fn parse_paragraph_at_beginning_of_document() {
+        let input = "This is a paragraph at the beginning.";
+        let doc = parse(input).expect("Failed to parse document");
+
+        assert_eq!(doc.len(), 1);
+        assert_paragraph(
+            &doc.get(0),
+            ["This is a paragraph at the beginning."].as_ref(),
+        );
+    }
+
+    #[test]
+    fn parse_multiple_paragraphs() {
+        let input = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
+        let doc = parse(input).expect("Failed to parse document");
+
+        assert_paragraph(&doc.get(0), ["First paragraph."].as_ref());
+        assert_paragraph(&doc.get(1), ["Second paragraph."].as_ref());
+        assert_paragraph(&doc.get(2), ["Third paragraph."].as_ref());
+        assert_eq!(doc.len(), 3);
     }
 }

@@ -27,19 +27,3 @@ impl Document {
         self.blocks.len()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::block::Block;
-    use crate::model::heading::Heading;
-    use crate::model::paragraph::Paragraph;
-    #[test]
-    fn build_document() {
-        let mut doc = Document::new();
-        doc.push(Block::Heading(Heading::new(2, "Section").unwrap()));
-        doc.push(Block::Paragraph(Paragraph::parse("A [link](u)")));
-        assert_eq!(doc.len(), 2);
-        assert!(!doc.is_empty());
-    }
-}

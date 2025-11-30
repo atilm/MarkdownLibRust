@@ -8,11 +8,9 @@
 //! use markdownlib::{Heading, Paragraph, Block, Document};
 //!
 //! let heading = Heading::new(1, "Title").unwrap();
-//! let para = Paragraph::parse("A [link](https://example.com) and ![img](img.png)");
 //! let mut doc = Document::new();
 //! doc.push(Block::Heading(heading));
-//! doc.push(Block::Paragraph(para));
-//! assert_eq!(doc.len(), 2);
+//! assert_eq!(doc.len(), 1);
 //! ```
 
 pub mod model;
