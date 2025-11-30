@@ -1,5 +1,8 @@
 //! Heading data type.
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingLevelError(pub u8);
+
 /// A Markdown heading (ATX style) with a level from 1 to 6.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Heading {
@@ -21,8 +24,6 @@ impl Heading {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeadingLevelError(pub u8);
 
 impl core::fmt::Display for HeadingLevelError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

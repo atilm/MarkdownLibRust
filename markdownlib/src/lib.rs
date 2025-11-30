@@ -16,4 +16,5 @@
 //! ```
 
 pub mod model;
+pub mod markdown_parser;
 pub use model::{Heading, HeadingLevelError, Inline, Paragraph, Block, Document};

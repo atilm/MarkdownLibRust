@@ -17,6 +17,9 @@ impl Document {
     pub fn push(&mut self, block: Block) {
         self.blocks.push(block);
     }
+    pub fn get(& self, index: usize) -> &Block {
+        &self.blocks[index]
+    }
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
